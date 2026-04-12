@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email"]
+    },
+    "group": {
+      "title": "Group",
+      "description": "A shared space for expenses",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "members": { "type": "array", "items": { "type": "string" } },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "members", "createdBy"]
+    },
+    "expense": {
+      "title": "Expense",
+      "description": "A recorded expense within a group",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "paidBy": { "type": "string" },
+        "splitType": { "type": "string", "enum": ["equal", "percentage", "exact"] },
+        "splits": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "userId": { "type": "string" },
+              "amount": { "type": "number" }
+            }
+          }
+        },
+        "date": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "description", "amount", "paidBy", "splitType", "splits", "date"]
+    },
+    "invitation": {
+      "title": "Invitation",
+      "description": "A request to join a group",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "groupName": { "type": "string" },
+        "invitedEmail": { "type": "string" },
+        "invitedUid": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "denied"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "groupName", "invitedEmail", "invitedUid", "senderUid", "senderName", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "user",
+      "description": "User profiles"
+    },
+    "/groups/{groupId}": {
+      "schema": "group",
+      "description": "Shared groups"
+    },
+    "/groups/{groupId}/expenses/{expenseId}": {
+      "schema": "expense",
+      "description": "Expenses within a group"
+    },
+    "/invitations/{invitationId}": {
+      "schema": "invitation",
+      "description": "Group invitations"
+    }
+  }
+}

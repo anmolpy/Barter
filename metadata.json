@@ -1,0 +1,5 @@
+{
+  "name": "Barter",
+  "description": "A collaborative finance tool for tracking shared balances and splitting expenses with friends and family.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (required)
+    //   - email: string (required)
+    //   - photoURL: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: groups
+    // Document ID: {groupId}
+    // Fields:
+    //   - name: string (required, 1-100 chars)
+    //   - description: string (optional, 0-500 chars)
+    //   - members: list of strings (required, UIDs)
+    //   - createdBy: string (required, UID)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: groups/{groupId}/expenses
+    // Document ID: {expenseId}
+    // Fields:
+    //   - groupId: string (required)
+    //   - description: string (required, 1-200 chars)
+    //   - amount: number (required, positive)
+    //   - paidBy: string (required, UID)
+    //   - splitType: string (required, ['equal', 'percentage', 'exact'])
+    //   - splits: list of maps (required)
+    //     - userId: string
+    //     - amount: number
+    //   - date: timestamp (required)
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isGroupMember(groupId) {
+      return isAuthenticated() && request.auth.uid in get(/databases/$(database)/documents/groups/$(groupId)).data.members;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidGroup(data) {
+      return data.keys().hasAll(['name', 'members', 'createdBy', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.members is list && data.members.size() > 0 && data.members.size() <= 50 &&
+             data.createdBy is string &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['groupId', 'description', 'amount', 'paidBy', 'splitType', 'splits', 'date', 'createdAt']) &&
+             data.description is string && data.description.size() > 0 && data.description.size() <= 200 &&
+             data.amount is number && data.amount > 0 &&
+             data.paidBy is string &&
+             data.splitType in ['equal', 'percentage', 'exact'] &&
+             data.splits is list &&
+             data.date is timestamp &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.uid == resource.data.uid &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    match /groups/{groupId} {
+      allow read: if isAuthenticated() && request.auth.uid in resource.data.members;
+      allow create: if isAuthenticated() && isValidGroup(request.resource.data) && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuthenticated() && 
+                    (request.auth.uid in resource.data.members || 
+                     exists(/databases/$(database)/documents/invitations/$(groupId + "_" + request.auth.uid))) && 
+                    isValidGroup(request.resource.data) &&
+                    request.resource.data.createdBy == resource.data.createdBy &&
+                    request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAuthenticated() && request.auth.uid == resource.data.createdBy;
+
+      match /expenses/{expenseId} {
+        allow read: if isGroupMember(groupId);
+        allow create: if isGroupMember(groupId) && isValidExpense(request.resource.data) && request.resource.data.groupId == groupId;
+        allow update: if isGroupMember(groupId) && isValidExpense(request.resource.data) && 
+                      request.resource.data.groupId == resource.data.groupId &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if isGroupMember(groupId) && (request.auth.uid == resource.data.paidBy || request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy);
+      }
+    }
+
+    match /invitations/{invitationId} {
+      allow read: if isAuthenticated() && (
+        resource == null || 
+        request.auth.uid == resource.data.invitedUid || 
+        request.auth.uid == resource.data.senderUid ||
+        (exists(/databases/$(database)/documents/groups/$(resource.data.groupId)) && 
+         request.auth.uid in get(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.members)
+      );
+      allow create: if isAuthenticated() && 
+                    request.resource.data.senderUid == request.auth.uid && 
+                    request.resource.data.status == 'pending' &&
+                    invitationId == request.resource.data.groupId + "_" + request.resource.data.invitedUid &&
+                    exists(/databases/$(database)/documents/groups/$(request.resource.data.groupId)) &&
+                    request.auth.uid in get(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.members;
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.invitedUid && 
+                    request.resource.data.status in ['accepted', 'denied'] &&
+                    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.invitedUid || request.auth.uid == resource.data.senderUid);
+    }
+  }
+}
