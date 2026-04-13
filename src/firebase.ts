@@ -2,23 +2,24 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-const getEnv = (key: string, fallbackKey?: string): string => {
-  const fromImportMeta = (import.meta.env as Record<string, string | undefined>)[`VITE_${key}`];
-  const fromProcess = (process.env as Record<string, string | undefined>)[key];
-  const fromFallback = fallbackKey ? (process.env as Record<string, string | undefined>)[fallbackKey] : undefined;
-
-  return fromImportMeta ?? fromProcess ?? fromFallback ?? '';
-};
+declare const __FIREBASE_PROJECT_ID__: string;
+declare const __FIREBASE_APP_ID__: string;
+declare const __FIREBASE_API_KEY__: string;
+declare const __FIREBASE_AUTH_DOMAIN__: string;
+declare const __FIREBASE_FIRESTORE_DATABASE_ID__: string;
+declare const __FIREBASE_STORAGE_BUCKET__: string;
+declare const __FIREBASE_MESSAGING_SENDER_ID__: string;
+declare const __FIREBASE_MEASUREMENT_ID__: string;
 
 const firebaseConfig = {
-  projectId: getEnv('PROJECT_ID'),
-  appId: getEnv('APP_ID'),
-  apiKey: getEnv('API_KEY'),
-  authDomain: getEnv('AUTH_DOMAIN'),
-  firestoreDatabaseId: getEnv('FIRESTORE_DATABASE_ID', 'FIRE_STORE_DATABASE_ID'),
-  storageBucket: getEnv('STORAGE_BUCKET'),
-  messagingSenderId: getEnv('MESSAGING_SENDER_ID'),
-  measurementId: getEnv('MEASUREMENT_ID'),
+  projectId: __FIREBASE_PROJECT_ID__,
+  appId: __FIREBASE_APP_ID__,
+  apiKey: __FIREBASE_API_KEY__,
+  authDomain: __FIREBASE_AUTH_DOMAIN__,
+  firestoreDatabaseId: __FIREBASE_FIRESTORE_DATABASE_ID__,
+  storageBucket: __FIREBASE_STORAGE_BUCKET__,
+  messagingSenderId: __FIREBASE_MESSAGING_SENDER_ID__,
+  measurementId: __FIREBASE_MEASUREMENT_ID__,
 };
 
 const app = initializeApp(firebaseConfig);
