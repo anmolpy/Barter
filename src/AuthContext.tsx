@@ -28,6 +28,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Ensure user document exists in Firestore
         const userRef = doc(db, 'users', firebaseUser.uid);
         try {
+          await setDoc(doc(db, 'publicProfiles', firebaseUser.uid), {
+            uid: firebaseUser.uid,
+            displayName: (firebaseUser.displayName || 'Anonymous').slice(0, 99),
+          });
           const userDoc = await getDoc(userRef);
           if (!userDoc.exists()) {
             await setDoc(userRef, {

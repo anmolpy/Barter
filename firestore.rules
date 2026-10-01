@@ -87,22 +87,51 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isAuthenticated();
+      allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
                     request.resource.data.uid == resource.data.uid &&
                     request.resource.data.createdAt == resource.data.createdAt;
     }
 
+    // Minimal public identity has no email; direct UID lookup only (no directory list).
+    match /publicProfiles/{userId} {
+      allow get: if isAuthenticated();
+      allow create, update: if isOwner(userId) &&
+        request.resource.data.keys().hasOnly(['uid', 'displayName']) &&
+        request.resource.data.uid == userId &&
+        request.resource.data.displayName is string &&
+        request.resource.data.displayName.size() > 0 && request.resource.data.displayName.size() < 100;
+    }
+
     match /groups/{groupId} {
       allow read: if isAuthenticated() && request.auth.uid in resource.data.members;
-      allow create: if isAuthenticated() && isValidGroup(request.resource.data) && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAuthenticated() && 
-                    (request.auth.uid in resource.data.members || 
-                     exists(/databases/$(database)/documents/invitations/$(groupId + "_" + request.auth.uid))) && 
-                    isValidGroup(request.resource.data) &&
-                    request.resource.data.createdBy == resource.data.createdBy &&
-                    request.resource.data.createdAt == resource.data.createdAt;
+      allow create: if isAuthenticated() && isValidGroup(request.resource.data) &&
+                    request.resource.data.createdBy == request.auth.uid &&
+                    request.resource.data.members == [request.auth.uid];
+      allow update: if isAuthenticated() && isValidGroup(request.resource.data) &&
+                    (ownerEdit() || acceptInvitation(groupId));
+
+      function ownerEdit() {
+        return request.auth.uid == resource.data.createdBy &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'description', 'members']) &&
+          request.resource.data.members.hasAll([resource.data.createdBy]) &&
+          resource.data.members.hasAll(request.resource.data.members) &&
+          request.resource.data.members.size() == request.resource.data.members.toSet().size();
+      }
+      function acceptInvitation(groupId) {
+        let invitation = /databases/$(database)/documents/invitations/$(groupId + "_" + request.auth.uid);
+        return !(request.auth.uid in resource.data.members) &&
+          exists(invitation) && get(invitation).data.status == 'pending' &&
+          get(invitation).data.invitedUid == request.auth.uid &&
+          get(invitation).data.groupId == groupId &&
+          // Consume the invitation in the same atomic batch as joining.
+          getAfter(invitation).data.status == 'accepted' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
+          request.resource.data.members.hasAll(resource.data.members) &&
+          request.resource.data.members.hasAll([request.auth.uid]) &&
+          request.resource.data.members.size() == resource.data.members.size() + 1;
+      }
       allow delete: if isAuthenticated() && request.auth.uid == resource.data.createdBy;
 
       match /expenses/{expenseId} {
@@ -130,7 +159,10 @@ service cloud.firestore {
                     exists(/databases/$(database)/documents/groups/$(request.resource.data.groupId)) &&
                     request.auth.uid in get(/databases/$(database)/documents/groups/$(request.resource.data.groupId)).data.members;
       allow update: if isAuthenticated() && request.auth.uid == resource.data.invitedUid && 
+                    resource.data.status == 'pending' &&
                     request.resource.data.status in ['accepted', 'denied'] &&
+                    (request.resource.data.status == 'denied' ||
+                      request.auth.uid in getAfter(/databases/$(database)/documents/groups/$(resource.data.groupId)).data.members) &&
                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.invitedUid || request.auth.uid == resource.data.senderUid);
     }
