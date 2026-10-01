@@ -14,6 +14,7 @@ import {
   deleteDoc,
   getDocs,
   updateDoc,
+  writeBatch,
   arrayUnion
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
@@ -59,7 +60,6 @@ interface Invitation {
   id: string;
   groupId: string;
   groupName: string;
-  invitedEmail: string;
   invitedUid: string;
   senderUid: string;
   senderName: string;
@@ -95,7 +95,7 @@ export default function Dashboard() {
   const [expenseAmount, setExpenseAmount] = useState('');
   const [expenseParticipants, setExpenseParticipants] = useState<string[]>([]);
   const [expenseError, setExpenseError] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteUid, setInviteUid] = useState('');
   const [inviteError, setInviteError] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
   const [memberProfiles, setMemberProfiles] = useState<Record<string, MemberProfile>>({});
@@ -190,18 +190,17 @@ export default function Dashboard() {
       const entries = await Promise.all(
         selectedGroup.members.map(async (memberId) => {
           try {
-            const memberSnapshot = await getDoc(doc(db, 'users', memberId));
+            const memberSnapshot = await getDoc(doc(db, 'publicProfiles', memberId));
 
             if (memberSnapshot.exists()) {
               const data = memberSnapshot.data();
               return [memberId, {
                 uid: memberId,
-                displayName: data.displayName || data.email || 'Group member',
-                email: data.email,
+                displayName: data.displayName || 'Group member',
               }] as const;
             }
           } catch (error) {
-            handleFirestoreError(error, OperationType.GET, `users/${memberId}`);
+            handleFirestoreError(error, OperationType.GET, `publicProfiles/${memberId}`);
           }
 
           return [memberId, {
@@ -257,31 +256,22 @@ export default function Dashboard() {
 
   const handleInviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !selectedGroup || !inviteEmail.trim()) return;
+    if (!user || !selectedGroup || !inviteUid.trim()) return;
 
     setInviteLoading(true);
     setInviteError('');
 
     try {
-      // 1. Find user by email
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', inviteEmail.trim().toLowerCase()));
-      let querySnapshot;
-      try {
-        querySnapshot = await getDocs(q);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, 'users');
+      const invitedUid = inviteUid.trim();
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(invitedUid)) {
+        setInviteError('Enter the member ID shown in your friend’s account.');
         return;
       }
-
-      if (querySnapshot.empty) {
-        setInviteError('User not found. They must sign in to Barter first.');
-        setInviteLoading(false);
+      const profile = await getDoc(doc(db, 'publicProfiles', invitedUid));
+      if (!profile.exists()) {
+        setInviteError('User not found. Ask them to sign in again and share their member ID.');
         return;
       }
-
-      const invitedUser = querySnapshot.docs[0].data();
-      const invitedUid = invitedUser.uid;
 
       if (selectedGroup.members.includes(invitedUid)) {
         setInviteError('User is already a member of this group.');
@@ -312,7 +302,6 @@ export default function Dashboard() {
         await setDoc(doc(db, 'invitations', invitationId), {
           groupId: selectedGroup.id,
           groupName: selectedGroup.name,
-          invitedEmail: invitedUser.email,
           invitedUid: invitedUid,
           senderUid: user.uid,
           senderName: user.displayName,
@@ -324,7 +313,7 @@ export default function Dashboard() {
         return;
       }
 
-      setInviteEmail('');
+      setInviteUid('');
       setIsInviteModalOpen(false);
     } catch (error) {
       console.error('Invite error:', error);
@@ -337,23 +326,12 @@ export default function Dashboard() {
   const handleAcceptInvitation = async (invitation: Invitation) => {
     if (!user) return;
     try {
-      // 1. Add user to group
-      const groupRef = doc(db, 'groups', invitation.groupId);
-      try {
-        await updateDoc(groupRef, {
-          members: arrayUnion(user.uid)
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, `groups/${invitation.groupId}`);
-        return;
-      }
+      // Joining and consuming the pending invitation must be atomic.
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'groups', invitation.groupId), { members: arrayUnion(user.uid) });
+      batch.update(doc(db, 'invitations', invitation.id), { status: 'accepted' });
+      await batch.commit();
 
-      // 2. Delete invitation
-      try {
-        await deleteDoc(doc(db, 'invitations', invitation.id));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `invitations/${invitation.id}`);
-      }
     } catch (error) {
       console.error('Accept invitation error:', error);
     }
@@ -597,6 +575,7 @@ export default function Dashboard() {
             <div className="flex-1 min-w-0">
               <p className="font-bold text-slate-900 truncate">{user?.displayName}</p>
               <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+              <p className="text-xs text-slate-500 break-all select-all">Member ID: {user?.uid}</p>
             </div>
           </div>
         </div>
@@ -838,13 +817,13 @@ export default function Dashboard() {
               
               <form onSubmit={handleInviteMember} className="space-y-6">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Member Email</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Member ID</label>
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="friend@example.com"
+                    value={inviteUid}
+                    onChange={(e) => setInviteUid(e.target.value)}
+                    placeholder="Paste your friend’s member ID"
                     className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-brand-500 focus:border-transparent outline-none transition-all"
                   />
                   {inviteError && (
